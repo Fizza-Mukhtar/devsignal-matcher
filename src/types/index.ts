@@ -1,12 +1,7 @@
-// ============================================================
-// Core domain types for DevSignal Matching Engine
-// ============================================================
-
 export type Seniority = 'junior' | 'mid' | 'senior' | 'staff' | 'principal'
 export type Availability = 'immediate' | '2_weeks' | '1_month'
 export type EnglishLevel = 'basic' | 'conversational' | 'fluent' | 'native'
 
-// ---- Developer (from DB) ------------------------------------
 export interface Developer {
   id: string
   name: string
@@ -32,8 +27,6 @@ export interface Developer {
   created_at: string
 }
 
-// Developer as returned by match_developers() SQL function
-// (same as Developer but without is_active/created_at, plus semantic_score)
 export interface DeveloperSearchResult {
   id: string
   name: string
@@ -57,52 +50,30 @@ export interface DeveloperSearchResult {
   semantic_score: number
 }
 
-// ---- Role (client requirement) ------------------------------
-export interface Role {
-  id: string
-  client_name: string
-  contact_email?: string
-  raw_description: string
-  parsed_spec: ParsedSpec
-  required_stack: string[]
-  preferred_stack: string[]
-  seniority_min: Seniority
-  budget_min_usd?: number
-  budget_max_usd?: number
-  timezone_min_utc: number
-  timezone_max_utc: number
-  start_date?: string
-  team_size?: number
-  status: 'pending' | 'matched' | 'sent_to_client' | 'filled' | 'closed'
-  created_at: string
-}
-
-// AI-parsed spec returned by Groq
 export interface ParsedSpec {
   summary: string
   required_stack: string[]
   preferred_stack: string[]
-  red_flags: string[]
   seniority_recommendation: Seniority
+  budget_signal: 'low' | 'mid' | 'high' | 'unknown'
+  red_flags: string[]
   reasoning: string
 }
 
-// ---- Match result --------------------------------------------
 export interface MatchResult {
   developer: DeveloperSearchResult
   scores: {
-    semantic: number      // 0–1
-    stack: number         // 0–1
-    timezone: number      // 0–1
-    rate: number          // 0–1
-    seniority: number     // 0–1
-    composite: number     // 0–1 (final weighted)
+    semantic: number
+    stack: number
+    timezone: number
+    rate: number
+    seniority: number
+    composite: number
   }
   rank: number
   match_explanation?: string
 }
 
-// ---- API request/response -----------------------------------
 export interface MatchRequest {
   raw_description: string
   client_name: string

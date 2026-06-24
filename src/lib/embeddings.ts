@@ -1,57 +1,58 @@
 // ============================================================
-// Embeddings via Hugging Face Inference API
-// Model: sentence-transformers/all-MiniLM-L6-v2
-// Output: 384-dimensional float32 vectors
-// Free tier: ~1000 requests/day (plenty for development + demo)
+// Embeddings via Ollama (local — no internet required)
+// Model: nomic-embed-text
+// Output: 768-dimensional float32 vectors
+// Setup: install Ollama from ollama.com, then run:
+//   ollama pull nomic-embed-text
+// Ollama runs automatically at http://localhost:11434
 // ============================================================
 
-const HF_API_URL =
-  'https://api-inference.huggingface.co/models/sentence-transformers/all-MiniLM-L6-v2'
-
-const HF_API_KEY = process.env.HUGGINGFACE_API_KEY
-
-if (!HF_API_KEY) {
-  console.warn('Warning: HUGGINGFACE_API_KEY not set. Embeddings will fail.')
-}
+const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
+const OLLAMA_MODEL = 'nomic-embed-text'
 
 /**
  * Generate an embedding vector for a single text string.
- * Returns a 384-dimensional float array.
+ * Returns a 768-dimensional float array via local Ollama.
  */
 export async function embed(text: string): Promise<number[]> {
-  // Clean and truncate text (model max: 256 tokens ≈ ~1000 chars)
-  const cleanText = text.trim().slice(0, 1000)
+  const cleanText = text.trim().slice(0, 2000)
 
-  const response = await fetch(HF_API_URL, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${HF_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      inputs: cleanText,
-      options: { wait_for_model: true }, // wait if model is loading (cold start)
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: OLLAMA_MODEL,
+        prompt: cleanText,
+      }),
+    })
+  } catch (err) {
+    throw new Error(
+      `Cannot reach Ollama at ${OLLAMA_URL}. Make sure Ollama is running.\n` +
+      `  -> Open a terminal and check: ollama list\n` +
+      `  -> If not running, start it: ollama serve\n` +
+      `  Original error: ${err}`
+    )
+  }
 
   if (!response.ok) {
-    const error = await response.text()
-    throw new Error(`HuggingFace embedding failed: ${response.status} — ${error}`)
+    const body = await response.text()
+    throw new Error(`Ollama embedding failed (${response.status}): ${body}`)
   }
 
   const result = await response.json()
 
-  // HF returns the embedding directly as an array of numbers
-  if (!Array.isArray(result)) {
-    throw new Error(`Unexpected HuggingFace response format: ${JSON.stringify(result)}`)
+  if (!result.embedding || !Array.isArray(result.embedding)) {
+    throw new Error(`Unexpected Ollama response: ${JSON.stringify(result)}`)
   }
 
-  return result as number[]
+  return result.embedding as number[]
 }
 
 /**
- * Generate embeddings for multiple texts with rate-limit-friendly batching.
- * Adds a 300ms delay between requests to avoid HF rate limits.
+ * Generate embeddings for multiple texts.
+ * Ollama is local so no rate limits — no delay needed between requests.
  */
 export async function embedBatch(
   texts: string[],
@@ -62,13 +63,7 @@ export async function embedBatch(
   for (let i = 0; i < texts.length; i++) {
     const embedding = await embed(texts[i])
     embeddings.push(embedding)
-
     onProgress?.(i + 1, texts.length)
-
-    // Polite delay between requests — HF free tier is generous but not unlimited
-    if (i < texts.length - 1) {
-      await new Promise((resolve) => setTimeout(resolve, 300))
-    }
   }
 
   return embeddings
@@ -106,5 +101,5 @@ export function buildDeveloperEmbedText(developer: {
  * Build the text to embed for a client role requirement.
  */
 export function buildRoleEmbedText(rawDescription: string): string {
-  return rawDescription.trim().slice(0, 1000)
+  return rawDescription.trim().slice(0, 2000)
 }

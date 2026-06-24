@@ -13,15 +13,17 @@ dotenv.config({ path: path.resolve(__dirname, '../.env.local') })
 import { createClient } from '@supabase/supabase-js'
 import { embed } from '../src/lib/embeddings'
 
+// Use service role key — bypasses RLS so we can read the developers table
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
+  process.env.SUPABASE_SERVICE_ROLE_KEY!,  // <-- fixed: was using anon key before
+  { auth: { autoRefreshToken: false, persistSession: false } }
 )
 
 const TEST_QUERIES = [
   {
     label: 'Query 1 — AI startup needs senior full-stack',
-    text: 'We are building an AI-powered legal document review tool. Series A, 6-person team. Need a senior full-stack engineer with React and Node.js experience who has worked at startups before. LatAm timezone preferred. Budget $50–65/hr.',
+    text: 'We are building an AI-powered legal document review tool. Series A, 6-person team. Need a senior full-stack engineer with React and Node.js experience who has worked at startups before. LatAm timezone preferred. Budget $50-65/hr.',
     budgetMax: 65,
     utcMin: -6,
     utcMax: -3,
@@ -47,14 +49,21 @@ async function runTests() {
   console.log('==========================================\n')
 
   // Check DB has data
-  const { count } = await supabase
+  const { count, error: countError } = await supabase
     .from('developers')
     .select('*', { count: 'exact', head: true })
-  
+
+  if (countError) {
+    console.error('❌ Could not query developers table:', countError.message)
+    console.error('   Check your SUPABASE_SERVICE_ROLE_KEY in .env.local')
+    process.exit(1)
+  }
+
   if (!count || count === 0) {
     console.error('❌ No developers in DB. Run "npm run seed" first.')
     process.exit(1)
   }
+
   console.log(`📊 Developer pool: ${count} active developers\n`)
 
   for (const query of TEST_QUERIES) {
@@ -108,7 +117,8 @@ async function runTests() {
         semantic_score: number
       }, i: number) => {
         const score = (dev.semantic_score * 100).toFixed(1)
-        const stars = '★'.repeat(Math.round(dev.semantic_score * 5))
+        const filled = Math.round(dev.semantic_score * 5)
+        const stars = '★'.repeat(filled) + '☆'.repeat(5 - filled)
         console.log(`   ${i + 1}. ${dev.name} — ${dev.role_title}`)
         console.log(
           `      📍 ${dev.location_city}, ${dev.location_country} | 💰 $${dev.hourly_rate_usd}/hr | ${dev.seniority}`
@@ -123,13 +133,12 @@ async function runTests() {
     }
 
     // Small delay between queries
-    await new Promise((r) => setTimeout(r, 500))
+    await new Promise((r) => setTimeout(r, 200))
   }
 
   console.log(`\n${'='.repeat(60)}`)
-  console.log('✅ Day 1 test complete!')
-  console.log('   If you see 5 ranked results per query above, the vector')
-  console.log('   search is working correctly. Day 2 builds the scoring engine.')
+  console.log('✅ Day 1 complete!')
+  console.log('   Vector search is working. Ready for Day 2.')
 }
 
 runTests().catch((error) => {
