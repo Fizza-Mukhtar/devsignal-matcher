@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { runMatch } from '../../../lib/matcher'
+import { saveRole, saveMatches } from '../../../lib/db'
 import type { MatchRequest, MatchResponse } from '../../../types'
 
 export async function POST(req: NextRequest) {
@@ -36,8 +37,38 @@ export async function POST(req: NextRequest) {
       supabaseUrl
     )
 
+    // Persist role and matches so they appear in the admin panel
+    const roleId = crypto.randomUUID()
+
+    await saveRole(roleId, {
+      client_name: body.client_name,
+      raw_description: body.raw_description,
+      parsed_spec: parsedSpec,
+      budget_max_usd: body.budget_max_usd,
+      timezone_min_utc: body.timezone_min_utc,
+      timezone_max_utc: body.timezone_max_utc,
+      status: 'matched',
+    })
+
+    if (matches.length > 0) {
+      await saveMatches(
+        roleId,
+        matches.map((m) => ({
+          developer_id: m.developer.id,
+          rank: m.rank,
+          semantic_score: m.scores.semantic,
+          stack_score: m.scores.stack,
+          timezone_score: m.scores.timezone,
+          rate_score: m.scores.rate,
+          seniority_score: m.scores.seniority,
+          composite_score: m.scores.composite,
+          match_explanation: m.match_explanation,
+        }))
+      )
+    }
+
     const response: MatchResponse = {
-      role_id: crypto.randomUUID(),
+      role_id: roleId,
       matches,
       parsed_spec: parsedSpec,
       total_pool_size: totalPoolSize,
