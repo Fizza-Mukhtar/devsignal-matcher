@@ -1,40 +1,150 @@
-This is a [Next.js](https://nextjs.org/) project bootstrapped with [`create-next-app`](https://github.com/vercel/next.js/tree/canary/packages/create-next-app).
+# DevSignal Matcher
 
-## Getting Started
+A candidate-to-role matching engine built for DevSignal's internal operations.
 
-First, run the development server:
+## The problem
+
+DevSignal manually matches client requirements to a pool of 200+ vetted developers.
+As the pool and client demand grow, doing this from memory and spreadsheets becomes
+the binding constraint on how fast the business can scale.
+
+## What this builds
+
+A hybrid semantic + rule-based matching engine that takes a raw client requirement
+and ranks the developer pool by fit across five dimensions — returning the top
+candidates in under 3 seconds with a full score breakdown and AI-generated
+match explanation per candidate.
+
+The system has two surfaces:
+
+**Client-facing matcher** (`/`)
+- Free-text requirement input — describe what you are building and who you need
+- AI parses the raw text into a structured hiring spec (required stack, seniority, red flags)
+- Vector search across the developer pool using semantic similarity
+- Rule-based scoring layer on top: stack overlap, timezone compatibility, rate vs budget, seniority fit
+- Top 5 candidates returned with per-dimension score breakdown and one-sentence match explanation
+
+**Operator panel** (`/admin`)
+- Internal view of all submitted requirements with status tracking
+- Per-role review page: approve or reject individual candidates, add operator notes
+- Mark requirements as sent to client
+- All decisions persisted to database
+
+## Matching architecture
+
+```
+Client requirement (raw text)
+        │
+        ▼
+Groq llama-3.3-70b — parse into structured spec
+        │
+        ▼
+Ollama nomic-embed-text — embed requirement (768-dim vector)
+        │
+        ▼
+pgvector cosine similarity — pull top 20 candidates from pool
+        │
+        ▼
+Rule-based scoring layer
+  ├── Stack overlap score     (required vs preferred weighting)
+  ├── Timezone score          (degrades per hour outside window)
+  ├── Rate score              (rewards headroom below budget)
+  └── Seniority score        (band distance penalty)
+        │
+        ▼
+Weighted composite score
+  semantic 45% + stack 25% + timezone 15% + rate 10% + seniority 5%
+        │
+        ▼
+Top 5 re-ranked candidates
+        │
+        ▼
+Groq — generate one-sentence match explanation per candidate
+```
+
+## Why hybrid over pure semantic search
+
+Pure vector search surfaces developers who sound like a good fit but can fail
+on hard constraints — a developer with a perfect semantic match who is $30/hr
+over budget or 9 time zones away is not a real match. The rule-based layer
+enforces business constraints while the semantic layer handles the parts that
+cannot be expressed as filters.
+
+## Tech stack
+
+- **Next.js 14** — App Router, API routes
+- **TypeScript** — end to end
+- **Supabase** — Postgres with pgvector extension
+- **Ollama + nomic-embed-text** — local embeddings, 768 dimensions, no API cost
+- **Groq + llama-3.3-70b** — requirement parsing and match explanations
+- **Vercel** — deployment
+
+## Local setup
+
+### Prerequisites
+
+- Node.js 18+
+- [Ollama](https://ollama.com) installed and running
+- Supabase project with pgvector enabled
+
+### 1. Clone and install
+
+```bash
+git clone https://github.com/YOUR_USERNAME/devsignal-matcher
+cd devsignal-matcher
+npm install
+```
+
+### 2. Environment variables
+
+Copy `.env.local.example` to `.env.local` and fill in:
+
+```
+NEXT_PUBLIC_SUPABASE_URL=
+NEXT_PUBLIC_SUPABASE_ANON_KEY=
+SUPABASE_SERVICE_ROLE_KEY=
+GROQ_API_KEY=
+NEXT_PUBLIC_ADMIN_PASSWORD=
+```
+
+### 3. Database setup
+
+Run `supabase/schema.sql` in the Supabase SQL editor.
+
+### 4. Pull the embedding model
+
+```bash
+ollama pull nomic-embed-text
+```
+
+### 5. Seed the developer pool
+
+```bash
+npm run seed
+```
+
+Embeds and inserts 32 fictional developer profiles representing DevSignal's
+LatAm and MENA talent pool.
+
+### 6. Run
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Open `http://localhost:3000` for the matcher and `http://localhost:3000/admin`
+for the operator panel.
 
-You can start editing the page by modifying `pages/index.tsx`. The page auto-updates as you edit the file.
+## Deployment note
 
-[API routes](https://nextjs.org/docs/api-routes/introduction) can be accessed on [http://localhost:3000/api/hello](http://localhost:3000/api/hello). This endpoint can be edited in `pages/api/hello.ts`.
+This project uses Ollama for embeddings which runs locally. For production
+deployment, the embedding step needs to be replaced with a hosted embedding
+service. The `src/lib/embeddings.ts` file is the only file that needs to change —
+the interface is identical regardless of embedding provider.
 
-The `pages/api` directory is mapped to `/api/*`. Files in this directory are treated as [API routes](https://nextjs.org/docs/api-routes/introduction) instead of React pages.
+## What this would look like in production
 
-This project uses [`next/font`](https://nextjs.org/docs/basic-features/font-optimization) to automatically optimize and load Inter, a custom Google Font.
-
-## Learn More
-
-To learn more about Next.js, take a look at the following resources:
-
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
-
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js/) - your feedback and contributions are welcome!
-
-## Deploy on Vercel
-
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/deployment) for more details.
+- Developer pool ingestion pipeline — auto-embed new developers as they are vetted
+- Feedback loop — operator overrides feed back into score weight calibration
+- Trial week instrumentation — GitHub activity and communication signals during the trial
+- Pool decay detection — flag developers whose profiles have gone stale

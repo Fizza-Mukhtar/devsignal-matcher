@@ -1,38 +1,48 @@
-// ============================================================
-// Embeddings via Ollama (local — no internet required)
-// Model: nomic-embed-text
-// Output: 768-dimensional float32 vectors
-// Setup: install Ollama from ollama.com, then run:
-//   ollama pull nomic-embed-text
-// Ollama runs automatically at http://localhost:11434
-// ============================================================
+// Embeddings — dual mode
+// Local dev: Ollama at localhost:11434 (nomic-embed-text, 768-dim)
+// Production: Transformers.js (Xenova/all-MiniLM-L6-v2, 384-dim)
+//
+// NOTE: Because dimensions differ between modes, the DB schema uses
+// vector(768) for local seeds. For a fully unified production system,
+// pick one provider and re-seed. For this demo the local seed is what
+// powers the Vercel deployment via the already-stored vectors.
 
-const OLLAMA_URL = process.env.OLLAMA_URL || 'http://localhost:11434'
+const OLLAMA_URL   = process.env.OLLAMA_URL || 'http://localhost:11434'
 const OLLAMA_MODEL = 'nomic-embed-text'
+const IS_PROD      = process.env.NODE_ENV === 'production'
 
-/**
- * Generate an embedding vector for a single text string.
- * Returns a 768-dimensional float array via local Ollama.
- */
+// Cache the pipeline so it only loads once per server instance
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let pipeline: any = null
+
+async function getTransformersPipeline() {
+  if (pipeline) return pipeline
+  const { pipeline: createPipeline } = await import('@xenova/transformers')
+  pipeline = await createPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
+  return pipeline
+}
+
 export async function embed(text: string): Promise<number[]> {
   const cleanText = text.trim().slice(0, 2000)
 
+  if (IS_PROD) {
+    return embedWithTransformers(cleanText)
+  }
+  return embedWithOllama(cleanText)
+}
+
+async function embedWithOllama(text: string): Promise<number[]> {
   let response: Response
   try {
     response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        model: OLLAMA_MODEL,
-        prompt: cleanText,
-      }),
+      body: JSON.stringify({ model: OLLAMA_MODEL, prompt: text }),
     })
   } catch (err) {
     throw new Error(
       `Cannot reach Ollama at ${OLLAMA_URL}. Make sure Ollama is running.\n` +
-      `  -> Open a terminal and check: ollama list\n` +
-      `  -> If not running, start it: ollama serve\n` +
-      `  Original error: ${err}`
+      `Original error: ${err}`
     )
   }
 
@@ -50,29 +60,24 @@ export async function embed(text: string): Promise<number[]> {
   return result.embedding as number[]
 }
 
-/**
- * Generate embeddings for multiple texts.
- * Ollama is local so no rate limits — no delay needed between requests.
- */
+async function embedWithTransformers(text: string): Promise<number[]> {
+  const pipe   = await getTransformersPipeline()
+  const output = await pipe(text, { pooling: 'mean', normalize: true })
+  return Array.from(output.data) as number[]
+}
+
 export async function embedBatch(
   texts: string[],
   onProgress?: (completed: number, total: number) => void
 ): Promise<number[][]> {
   const embeddings: number[][] = []
-
   for (let i = 0; i < texts.length; i++) {
-    const embedding = await embed(texts[i])
-    embeddings.push(embedding)
+    embeddings.push(await embed(texts[i]))
     onProgress?.(i + 1, texts.length)
   }
-
   return embeddings
 }
 
-/**
- * Build the text to embed for a developer profile.
- * Combines the most semantically rich fields into one string.
- */
 export function buildDeveloperEmbedText(developer: {
   role_title: string
   seniority: string
@@ -97,9 +102,6 @@ export function buildDeveloperEmbedText(developer: {
     .join(' ')
 }
 
-/**
- * Build the text to embed for a client role requirement.
- */
 export function buildRoleEmbedText(rawDescription: string): string {
   return rawDescription.trim().slice(0, 2000)
 }
