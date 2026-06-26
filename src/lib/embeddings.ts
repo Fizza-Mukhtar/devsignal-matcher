@@ -1,21 +1,12 @@
-// Embeddings — dual mode
-// Local dev: Ollama at localhost:11434 (nomic-embed-text, 768-dim)
-// Production: Transformers.js (Xenova/all-MiniLM-L6-v2, 384-dim)
-//
-// NOTE: Because dimensions differ between modes, the DB schema uses
-// vector(768) for local seeds. For a fully unified production system,
-// pick one provider and re-seed. For this demo the local seed is what
-// powers the Vercel deployment via the already-stored vectors.
+// Embeddings via Transformers.js
+// Model: Xenova/all-MiniLM-L6-v2
+// Output: 384-dimensional vectors
+// Runs locally and on Vercel — no external API needed
 
-const OLLAMA_URL   = process.env.OLLAMA_URL || 'http://localhost:11434'
-const OLLAMA_MODEL = 'nomic-embed-text'
-const IS_PROD      = process.env.NODE_ENV === 'production'
-
-// Cache the pipeline so it only loads once per server instance
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let pipeline: any = null
 
-async function getTransformersPipeline() {
+async function getPipeline() {
   if (pipeline) return pipeline
   const { pipeline: createPipeline } = await import('@xenova/transformers')
   pipeline = await createPipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2')
@@ -24,45 +15,8 @@ async function getTransformersPipeline() {
 
 export async function embed(text: string): Promise<number[]> {
   const cleanText = text.trim().slice(0, 2000)
-
-  if (IS_PROD) {
-    return embedWithTransformers(cleanText)
-  }
-  return embedWithOllama(cleanText)
-}
-
-async function embedWithOllama(text: string): Promise<number[]> {
-  let response: Response
-  try {
-    response = await fetch(`${OLLAMA_URL}/api/embeddings`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ model: OLLAMA_MODEL, prompt: text }),
-    })
-  } catch (err) {
-    throw new Error(
-      `Cannot reach Ollama at ${OLLAMA_URL}. Make sure Ollama is running.\n` +
-      `Original error: ${err}`
-    )
-  }
-
-  if (!response.ok) {
-    const body = await response.text()
-    throw new Error(`Ollama embedding failed (${response.status}): ${body}`)
-  }
-
-  const result = await response.json()
-
-  if (!result.embedding || !Array.isArray(result.embedding)) {
-    throw new Error(`Unexpected Ollama response: ${JSON.stringify(result)}`)
-  }
-
-  return result.embedding as number[]
-}
-
-async function embedWithTransformers(text: string): Promise<number[]> {
-  const pipe   = await getTransformersPipeline()
-  const output = await pipe(text, { pooling: 'mean', normalize: true })
+  const pipe      = await getPipeline()
+  const output    = await pipe(cleanText, { pooling: 'mean', normalize: true })
   return Array.from(output.data) as number[]
 }
 

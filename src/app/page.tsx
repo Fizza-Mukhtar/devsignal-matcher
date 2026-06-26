@@ -125,11 +125,26 @@ export default function Home() {
             Matcher
           </span>
         </div>
-        {result && (
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            {result.matched_count} candidates matched from pool of {result.total_pool_size}
-          </span>
-        )}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
+          {result && (
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+              {result.matched_count} candidates matched from pool of {result.total_pool_size}
+            </span>
+          )}
+           <a
+            href="/admin"
+            style={{
+              fontSize: '12px',
+              color: 'var(--text-muted)',
+              textDecoration: 'none',
+              border: '1px solid var(--border)',
+              borderRadius: 'var(--radius)',
+              padding: '4px 10px',
+            }}
+          >
+            Operator panel
+        </a>
+      </div>
       </header>
 
       {/* Main layout */}
